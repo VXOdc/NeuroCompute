@@ -8,10 +8,21 @@ export function captureFrame(
 ): string | null {
   if (video.readyState < 2) return null;
 
+  // BUG FIX 6:
+  // readyState >= 2 is necessary but not sufficient. In some browsers
+  // (notably Firefox and Safari) the video can reach HAVE_CURRENT_DATA while
+  // videoWidth / videoHeight are still 0 — the frame data hasn't been
+  // decoded yet. Without this guard:
+  //   scale = Math.min(1, 640 / 0) → Infinity
+  //   canvas.width = 0 * Infinity → NaN
+  // ctx.drawImage on a NaN-sized canvas produces a corrupt or empty frame
+  // that gets sent to the API as a broken payload.
+  if (video.videoWidth === 0 || video.videoHeight === 0) return null;
+
   const canvas = document.createElement("canvas");
   const scale = Math.min(1, maxWidth / video.videoWidth);
-  canvas.width = video.videoWidth * scale;
-  canvas.height = video.videoHeight * scale;
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
@@ -20,7 +31,7 @@ export function captureFrame(
 
   // Strip the data URL prefix, return only base64 data
   const dataUrl = canvas.toDataURL("image/jpeg", quality);
-  return dataUrl.split(",")[1];
+  return dataUrl.split(",")[1] ?? null;
 }
 
 /**
