@@ -21,8 +21,24 @@ const HISTORY_MAX = 8;
 
 export default function HomePage() {
   const cameraRef = useRef<CameraHandle>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const latencyBuffer = useRef<number[]>([]);
+
+  // BUG FIX 2: Guard against concurrent async invocations.
+  // setInterval fires every N ms regardless of whether the previous async
+  // call has resolved. Without this guard, multiple API calls pile up
+  // simultaneously (4–6 in-flight at 300ms interval with ~2s API latency),
+  // causing state collisions and wasted API spend.
+  const processingRef = useRef(false);
+
+  // BUG FIX 3 + 4: Move retryCount from state to a ref.
+  // Previously retryCount was in useCallback's dependency array. Every error
+  // incremented it → processFrame was recreated → the interval useEffect
+  // re-fired → clearInterval + setInterval reset the loop mid-recovery.
+  // Additionally, reading retryCount inside the catch block was always stale
+  // (closure captured the value at creation time, not the current value).
+  // A ref gives us the always-current value with zero re-render side-effects.
+  const retryCountRef = useRef(0);
 
   const [isRunning, setIsRunning] = useState(false);
   const [samplingMode, setSamplingMode] = useState<SamplingMode>(500);
@@ -30,7 +46,6 @@ export default function HomePage() {
   const [history, setHistory] = useState<DetectionResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
   const [status, setStatus] = useState<SystemStatus>({
     camera: "idle",
     pipeline: "idle",
@@ -47,10 +62,14 @@ export default function HomePage() {
   });
 
   const processFrame = useCallback(async () => {
+    // BUG FIX 2: Skip if a call is already in-flight.
+    if (processingRef.current) return;
     if (!cameraRef.current) return;
+
     const frame = cameraRef.current.captureFrame();
     if (!frame) return;
 
+    processingRef.current = true;
     const frameStart = Date.now();
     setIsProcessing(true);
     setStatus((s) => ({ ...s, pipeline: "processing", api: "idle" }));
@@ -81,9 +100,9 @@ export default function HomePage() {
         latencyBuffer.current.reduce((a, b) => a + b, 0) /
         latencyBuffer.current.length;
 
+      retryCountRef.current = 0;
       setCurrentResult(result);
       setLastError(null);
-      setRetryCount(0);
       setHistory((h) => [result, ...h].slice(0, HISTORY_MAX));
       setStatus((s) => ({ ...s, pipeline: "idle", api: "ok" }));
       setMetrics((m) => ({
@@ -97,17 +116,25 @@ export default function HomePage() {
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
+      // BUG FIX 4: Read retryCount from ref — always current, never stale.
+      retryCountRef.current += 1;
+      const currentRetry = retryCountRef.current;
       setLastError(msg);
-      setRetryCount((c) => c + 1);
       setStatus((s) => ({
         ...s,
         pipeline: "error",
-        api: retryCount < 3 ? "retrying" : "error",
+        api: currentRetry < 3 ? "retrying" : "error",
       }));
     } finally {
       setIsProcessing(false);
+      processingRef.current = false;
     }
-  }, [samplingMode, retryCount]);
+    // BUG FIX 3: samplingMode is the only legitimate dep here. retryCount is
+    // gone from state; the processing guard and retry logic use refs instead.
+    // Removing retryCount from deps means processFrame keeps a stable
+    // reference across errors, so the interval useEffect below never
+    // unnecessarily resets the loop.
+  }, [samplingMode]);
 
   // Start/stop sampling loop
   useEffect(() => {
@@ -123,7 +150,8 @@ export default function HomePage() {
   const togglePipeline = () => {
     if (!isRunning) {
       setLastError(null);
-      setRetryCount(0);
+      retryCountRef.current = 0;
+      processingRef.current = false;
     }
     setIsRunning((v) => !v);
   };
