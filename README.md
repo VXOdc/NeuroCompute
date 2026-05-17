@@ -156,55 +156,7 @@ NeuroCompute/
 
 ---
 
-# Getting Started
 
-## Prerequisites
-
-- Node.js 18+
-- Mistral AI API key
-- Webcam-enabled device
-
----
-
-## Installation
-
-```bash
-git clone https://github.com/your-username/neurocompute.git
-
-cd neurocompute
-
-npm install
-```
-
----
-
-## Environment Variables
-
-Create a `.env.local` file in the project root:
-
-```env
-MISTRAL_API_KEY=your_api_key_here
-```
-
-The API key is handled server-side and is never exposed to the client.
-
----
-
-## Run Locally
-
-```bash
-npm run dev
-```
-
-Open:
-
-```txt
-http://localhost:3000
-```
-
-Allow camera permissions and start the pipeline.
-
----
 
 # How It Works
 
