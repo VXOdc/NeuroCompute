@@ -20,7 +20,7 @@ export default function Overlay({ result, isProcessing, lastError }: OverlayProp
         overflow: "hidden",
       }}
     >
-      {/* Top-left: scene label */}
+      {/* Top-left: scene label + optional actionable insight */}
       {result && (
         <div
           style={{
@@ -59,6 +59,24 @@ export default function Overlay({ result, isProcessing, lastError }: OverlayProp
           >
             {result.scene}
           </div>
+
+          {/* Actionable insight — only rendered when the model returns one */}
+          {result.actionable && (
+            <div
+              style={{
+                marginTop: "var(--space-2)",
+                paddingTop: "var(--space-2)",
+                borderTop: "1px solid rgba(255,255,255,0.07)",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-amber)",
+                lineHeight: 1.4,
+                letterSpacing: "0.01em",
+              }}
+            >
+              ↳ {result.actionable}
+            </div>
+          )}
         </div>
       )}
 
@@ -75,7 +93,7 @@ export default function Overlay({ result, isProcessing, lastError }: OverlayProp
         </div>
       )}
 
-      {/* Bottom: processing pulse or error */}
+      {/* Bottom bar: pulse dot + status text + timestamp */}
       <div
         style={{
           position: "absolute",
