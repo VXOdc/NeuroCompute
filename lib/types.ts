@@ -3,6 +3,7 @@ export interface DetectionResult {
   objects: DetectedObject[];
   confidence: "high" | "medium" | "low";
   summary: string;
+  actionable?: string; // Optional practical insight from the improved prompt
   timestamp: number;
   processingTime: number;
 }
@@ -10,6 +11,7 @@ export interface DetectionResult {
 export interface DetectedObject {
   label: string;
   detail?: string;
+  confidence?: "high" | "medium" | "low"; // Per-object confidence from improved prompt
 }
 
 export interface PerformanceMetrics {
