@@ -37,7 +37,27 @@ export async function analyzeFrame(
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 512,
+      // BUG FIX 5:
+      // Previously the system prompt was embedded as the second item in the
+      // user content array (after the image). Two problems:
+      //
+      // 1. Ordering: Vision models expect text instructions to precede the
+      //    image content in the content array. Placing the prompt after the
+      //    image caused inconsistent format compliance — the model would
+      //    occasionally prepend commentary or wrap output in markdown fences.
+      //
+      // 2. Role: The instruction belongs in a `system` role message, not
+      //    inline in the user turn. A proper system message is given higher
+      //    weight by the model for format and behavioral constraints.
+      //
+      // Fix: add a `system` role message for the format instructions, and
+      // keep the user turn as image-only so the model's attention is entirely
+      // on the visual when generating its response.
       messages: [
+        {
+          role: "system",
+          content: SYSTEM_PROMPT,
+        },
         {
           role: "user",
           content: [
@@ -46,10 +66,6 @@ export async function analyzeFrame(
               image_url: {
                 url: `data:image/jpeg;base64,${base64Image}`,
               },
-            },
-            {
-              type: "text",
-              text: SYSTEM_PROMPT,
             },
           ],
         },
