@@ -6,10 +6,15 @@ export const metadata: Metadata = {
   title: "NeuroCompute — Real-Time Vision System",
   description:
     "Browser-based AI perception interface. Real-time scene interpretation using Mistral Vision.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
   openGraph: {
     title: "NeuroCompute",
     description: "Real-time AI vision system. Scene interpretation in the browser.",
     type: "website",
+    images: [{ url: "/logo.svg" }],
   },
 };
 
