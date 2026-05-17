@@ -24,6 +24,17 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
     const streamRef = useRef<MediaStream | null>(null);
     const [ready, setReady] = useState(false);
 
+    // BUG FIX 1:
+    // Store the latest callbacks in refs so the camera useEffect can use []
+    // as its dependency array. Previously [onStatusChange, onError] were in
+    // the deps — but both are inline arrow functions in page.tsx that get a
+    // new reference on every render. This caused the effect to re-run on every
+    // state update, stopping and restarting the MediaStream continuously.
+    const onStatusChangeRef = useRef(onStatusChange);
+    const onErrorRef = useRef(onError);
+    useEffect(() => { onStatusChangeRef.current = onStatusChange; }, [onStatusChange]);
+    useEffect(() => { onErrorRef.current = onError; }, [onError]);
+
     useImperativeHandle(ref, () => ({
       captureFrame: () => {
         if (!videoRef.current) return null;
@@ -35,26 +46,43 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
       let cancelled = false;
 
       async function startCamera() {
-        onStatusChange?.("requesting");
+        onStatusChangeRef.current?.("requesting");
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
             audio: false,
           });
+
           if (cancelled) {
             stream.getTracks().forEach((t) => t.stop());
             return;
           }
+
           streamRef.current = stream;
+
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+
+            // BUG FIX 7:
+            // Safari (desktop and iOS) and some Chromium variants under strict
+            // autoplay policy won't honour the autoPlay HTML attribute when
+            // srcObject is set programmatically. The video stays paused,
+            // readyState never advances, onCanPlay never fires, and
+            // captureFrame always returns null. An explicit play() call ensures
+            // cross-browser playback. We swallow NotAllowedError gracefully —
+            // the onCanPlay handler below is still the canonical "ready" signal.
+            try {
+              await videoRef.current.play();
+            } catch {
+              // Silently ignore: policy-blocked autoplay; onCanPlay handles ready state.
+            }
           }
         } catch (err) {
           if (cancelled) return;
           const msg =
             err instanceof Error ? err.message : "Camera access denied";
-          onStatusChange?.("error");
-          onError?.(msg);
+          onStatusChangeRef.current?.("error");
+          onErrorRef.current?.(msg);
         }
       }
 
@@ -63,19 +91,21 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
       return () => {
         cancelled = true;
         streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
       };
-    }, [onStatusChange, onError]);
+      // Empty deps: runs once on mount. Callback refs above keep the latest
+      // onStatusChange / onError accessible without re-triggering this effect.
+    }, []);
 
     return (
       <div style={{ position: "relative", width: "100%", height: "100%" }}>
         <video
           ref={videoRef}
-          autoPlay
           playsInline
           muted
           onCanPlay={() => {
             setReady(true);
-            onStatusChange?.("active");
+            onStatusChangeRef.current?.("active");
           }}
           style={{
             width: "100%",
@@ -83,7 +113,7 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
             objectFit: "cover",
             display: "block",
             borderRadius: "inherit",
-            transform: "scaleX(-1)", // mirror for natural UX
+            transform: "scaleX(-1)",
           }}
         />
         {!ready && (
