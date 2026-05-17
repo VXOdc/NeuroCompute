@@ -1,162 +1,220 @@
 "use client";
 
-import {
-  useRef,
-  useEffect,
-  useImperativeHandle,
-  forwardRef,
-  useState,
-} from "react";
-import { captureFrame } from "@/lib/imageUtils";
+import { DetectionResult } from "@/lib/types";
+import { formatTime } from "@/lib/imageUtils";
 
-export interface CameraHandle {
-  // quality is optional — callers should derive it via adaptiveQuality()
-  captureFrame: (quality?: number) => string | null;
+interface OverlayProps {
+  result: DetectionResult | null;
+  isProcessing: boolean;
+  lastError: string | null;
 }
 
-interface CameraProps {
-  onStatusChange?: (status: "idle" | "requesting" | "active" | "error") => void;
-  onError?: (msg: string) => void;
-}
-
-const Camera = forwardRef<CameraHandle, CameraProps>(
-  ({ onStatusChange, onError }, ref) => {
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const [ready, setReady] = useState(false);
-
-    // BUG FIX 1:
-    // Store the latest callbacks in refs so the camera useEffect can use []
-    // as its dependency array. Previously [onStatusChange, onError] were in
-    // the deps — both are inline arrow functions in page.tsx that get a new
-    // reference on every render. This caused the effect to re-run on every
-    // state update, stopping and restarting the MediaStream continuously.
-    const onStatusChangeRef = useRef(onStatusChange);
-    const onErrorRef = useRef(onError);
-    useEffect(() => { onStatusChangeRef.current = onStatusChange; }, [onStatusChange]);
-    useEffect(() => { onErrorRef.current = onError; }, [onError]);
-
-    useImperativeHandle(ref, () => ({
-      // quality defaults to 0.65 here too; page.tsx passes adaptive value
-      captureFrame: (quality = 0.65) => {
-        if (!videoRef.current) return null;
-        return captureFrame(videoRef.current, quality);
-      },
-    }));
-
-    useEffect(() => {
-      let cancelled = false;
-
-      async function startCamera() {
-        onStatusChangeRef.current?.("requesting");
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-            audio: false,
-          });
-
-          if (cancelled) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-
-          streamRef.current = stream;
-
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-
-            // BUG FIX 7:
-            // Safari (desktop and iOS) and some Chromium variants under strict
-            // autoplay policy won't honour the autoPlay HTML attribute when
-            // srcObject is set programmatically. An explicit play() call ensures
-            // cross-browser playback. NotAllowedError is swallowed gracefully —
-            // the onCanPlay handler is the canonical "ready" signal.
-            try {
-              await videoRef.current.play();
-            } catch {
-              // Silently ignore: policy-blocked autoplay; onCanPlay handles ready state.
-            }
-          }
-        } catch (err) {
-          if (cancelled) return;
-          const msg =
-            err instanceof Error ? err.message : "Camera access denied";
-          onStatusChangeRef.current?.("error");
-          onErrorRef.current?.(msg);
-        }
-      }
-
-      startCamera();
-
-      return () => {
-        cancelled = true;
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      };
-      // Empty deps: runs once on mount. Callback refs above keep the latest
-      // handlers accessible without re-triggering the effect.
-    }, []);
-
-    return (
-      <div style={{ position: "relative", width: "100%", height: "100%" }}>
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          onCanPlay={() => {
-            setReady(true);
-            onStatusChangeRef.current?.("active");
-          }}
+export default function Overlay({ result, isProcessing, lastError }: OverlayProps) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        borderRadius: "inherit",
+        overflow: "hidden",
+      }}
+    >
+      {/* Top-left: scene label + optional actionable insight */}
+      {result && (
+        <div
           style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            display: "block",
-            borderRadius: "inherit",
-            transform: "scaleX(-1)", // mirror so it feels like a selfie camera
+            position: "absolute",
+            top: "var(--space-4)",
+            left: "var(--space-4)",
+            background: "rgba(10,10,11,0.82)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+            padding: "var(--space-3) var(--space-4)",
+            maxWidth: "calc(100% - var(--space-8))",
+            transition: "opacity var(--transition-base)",
+            opacity: isProcessing ? 0.6 : 1,
           }}
-        />
-        {!ready && (
+        >
           <div
             style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "var(--bg-elevated)",
-              borderRadius: "inherit",
+              fontSize: "11px",
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-tertiary)",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              marginBottom: "var(--space-1)",
             }}
           >
-            <CameraPlaceholder />
+            Scene
           </div>
+          <div
+            style={{
+              fontSize: "13px",
+              color: "var(--text-primary)",
+              lineHeight: 1.4,
+              fontWeight: 400,
+            }}
+          >
+            {result.scene}
+          </div>
+
+          {/* Actionable insight — only rendered when the model returns one */}
+          {result.actionable && (
+            <div
+              style={{
+                marginTop: "var(--space-2)",
+                paddingTop: "var(--space-2)",
+                borderTop: "1px solid rgba(255,255,255,0.07)",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-amber)",
+                lineHeight: 1.4,
+                letterSpacing: "0.01em",
+              }}
+            >
+              ↳ {result.actionable}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Top-right: confidence badge */}
+      {result && (
+        <div
+          style={{
+            position: "absolute",
+            top: "var(--space-4)",
+            right: "var(--space-4)",
+          }}
+        >
+          <ConfidenceBadge confidence={result.confidence} />
+        </div>
+      )}
+
+      {/* Bottom bar: pulse dot + status text + timestamp */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: "var(--space-4)",
+          left: "var(--space-4)",
+          right: "var(--space-4)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <PulseDot active={isProcessing} error={!!lastError} />
+          <span
+            style={{
+              fontSize: "11px",
+              fontFamily: "var(--font-mono)",
+              color: lastError
+                ? "var(--accent-red)"
+                : isProcessing
+                ? "var(--accent-blue)"
+                : "var(--text-tertiary)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {lastError
+              ? "Inference error"
+              : isProcessing
+              ? "Processing frame"
+              : result
+              ? "Scene interpretation active"
+              : "Awaiting frame"}
+          </span>
+        </div>
+        {result && (
+          <span
+            style={{
+              fontSize: "11px",
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-tertiary)",
+            }}
+          >
+            {formatTime(result.timestamp)}
+          </span>
         )}
       </div>
-    );
-  }
-);
+    </div>
+  );
+}
 
-Camera.displayName = "Camera";
-export default Camera;
+function ConfidenceBadge({
+  confidence,
+}: {
+  confidence: "high" | "medium" | "low";
+}) {
+  const colors = {
+    high: { bg: "var(--accent-green-dim)", text: "var(--accent-green)", border: "#166534" },
+    medium: { bg: "var(--accent-amber-dim)", text: "var(--accent-amber)", border: "#713f12" },
+    low: { bg: "var(--accent-red-dim)", text: "var(--accent-red)", border: "#7f1d1d" },
+  };
+  const c = colors[confidence];
 
-function CameraPlaceholder() {
   return (
-    <div style={{ textAlign: "center", color: "var(--text-tertiary)" }}>
-      <svg
-        width="32"
-        height="32"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        style={{ marginBottom: "var(--space-3)", display: "block", margin: "0 auto var(--space-3)" }}
+    <div
+      style={{
+        background: c.bg,
+        border: `1px solid ${c.border}`,
+        borderRadius: "var(--radius-sm)",
+        padding: "2px var(--space-2)",
+        display: "flex",
+        alignItems: "center",
+        gap: "var(--space-1)",
+      }}
+    >
+      <div
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: "50%",
+          background: c.text,
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: "10px",
+          fontFamily: "var(--font-mono)",
+          color: c.text,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          fontWeight: 500,
+        }}
       >
-        <path d="M23 7l-7 5 7 5V7z" />
-        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-      </svg>
-      <span style={{ fontSize: "12px", fontFamily: "var(--font-mono)", letterSpacing: "0.04em" }}>
-        Initializing camera
+        {confidence}
       </span>
+    </div>
+  );
+}
+
+function PulseDot({ active, error }: { active: boolean; error: boolean }) {
+  return (
+    <div
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: "50%",
+        background: error
+          ? "var(--accent-red)"
+          : active
+          ? "var(--accent-blue)"
+          : "var(--text-tertiary)",
+        flexShrink: 0,
+        animation: active && !error ? "pulse 1.4s ease-in-out infinite" : "none",
+      }}
+    >
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
     </div>
   );
 }
