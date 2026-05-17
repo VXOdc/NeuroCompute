@@ -6,7 +6,9 @@
   padding: 0;
 }
 
-:root {
+/* ─── Dark theme (default + explicit .dark class from next-themes) ─────── */
+:root,
+.dark {
   /* 8-point spacing scale */
   --space-1: 4px;
   --space-2: 8px;
@@ -19,7 +21,7 @@
   --space-9: 64px;
   --space-10: 80px;
 
-  /* Color system */
+  /* Color system — dark */
   --bg-base: #0a0a0b;
   --bg-surface: #111113;
   --bg-elevated: #18181b;
@@ -71,6 +73,44 @@
   --transition-slow: 320ms ease;
 }
 
+/* ─── Light theme (.light class applied by next-themes) ─────────────────── */
+.light {
+  --bg-base: #f4f4f6;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ebebef;
+  --bg-subtle: #e2e2e8;
+
+  --border-subtle: #d8d8df;
+  --border-default: #c8c8d2;
+  --border-strong: #adadba;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525a;
+  --text-tertiary: #8a8a94;
+  --text-disabled: #c4c4cc;
+
+  --accent-blue: #2563eb;
+  --accent-blue-dim: #dbeafe;
+  --accent-green: #16a34a;
+  --accent-green-dim: #dcfce7;
+  --accent-amber: #d97706;
+  --accent-amber-dim: #fef3c7;
+  --accent-red: #dc2626;
+  --accent-red-dim: #fee2e2;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+}
+
+/* ─── Smooth theme transition ───────────────────────────────────────────── */
+/* Applied to common properties; omit transform/opacity so animations still work */
+html {
+  transition:
+    background-color 0.22s ease,
+    color 0.22s ease;
+}
+
 html, body {
   height: 100%;
   background-color: var(--bg-base);
@@ -82,7 +122,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Scrollbar */
+/* ─── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
