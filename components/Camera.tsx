@@ -10,7 +10,8 @@ import {
 import { captureFrame } from "@/lib/imageUtils";
 
 export interface CameraHandle {
-  captureFrame: () => string | null;
+  // quality is optional — callers should derive it via adaptiveQuality()
+  captureFrame: (quality?: number) => string | null;
 }
 
 interface CameraProps {
@@ -27,8 +28,8 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
     // BUG FIX 1:
     // Store the latest callbacks in refs so the camera useEffect can use []
     // as its dependency array. Previously [onStatusChange, onError] were in
-    // the deps — but both are inline arrow functions in page.tsx that get a
-    // new reference on every render. This caused the effect to re-run on every
+    // the deps — both are inline arrow functions in page.tsx that get a new
+    // reference on every render. This caused the effect to re-run on every
     // state update, stopping and restarting the MediaStream continuously.
     const onStatusChangeRef = useRef(onStatusChange);
     const onErrorRef = useRef(onError);
@@ -36,9 +37,10 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
     useEffect(() => { onErrorRef.current = onError; }, [onError]);
 
     useImperativeHandle(ref, () => ({
-      captureFrame: () => {
+      // quality defaults to 0.65 here too; page.tsx passes adaptive value
+      captureFrame: (quality = 0.65) => {
         if (!videoRef.current) return null;
-        return captureFrame(videoRef.current);
+        return captureFrame(videoRef.current, quality);
       },
     }));
 
@@ -66,11 +68,9 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
             // BUG FIX 7:
             // Safari (desktop and iOS) and some Chromium variants under strict
             // autoplay policy won't honour the autoPlay HTML attribute when
-            // srcObject is set programmatically. The video stays paused,
-            // readyState never advances, onCanPlay never fires, and
-            // captureFrame always returns null. An explicit play() call ensures
-            // cross-browser playback. We swallow NotAllowedError gracefully —
-            // the onCanPlay handler below is still the canonical "ready" signal.
+            // srcObject is set programmatically. An explicit play() call ensures
+            // cross-browser playback. NotAllowedError is swallowed gracefully —
+            // the onCanPlay handler is the canonical "ready" signal.
             try {
               await videoRef.current.play();
             } catch {
@@ -94,7 +94,7 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
         streamRef.current = null;
       };
       // Empty deps: runs once on mount. Callback refs above keep the latest
-      // onStatusChange / onError accessible without re-triggering this effect.
+      // handlers accessible without re-triggering the effect.
     }, []);
 
     return (
@@ -113,7 +113,7 @@ const Camera = forwardRef<CameraHandle, CameraProps>(
             objectFit: "cover",
             display: "block",
             borderRadius: "inherit",
-            transform: "scaleX(-1)",
+            transform: "scaleX(-1)", // mirror so it feels like a selfie camera
           }}
         />
         {!ready && (
