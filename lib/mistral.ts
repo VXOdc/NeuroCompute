@@ -3,24 +3,34 @@ import { DetectionResult } from "./types";
 const MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions";
 const MODEL = "pixtral-12b-2409";
 
-const SYSTEM_PROMPT = `You are a precise visual analysis system. When given an image, respond ONLY with valid JSON — no markdown, no explanation, no preamble.
+// Improved prompt: more specific labels, spatial awareness, actionable insights,
+// and per-object confidence. Rules explicitly forbid markdown and hallucination.
+const SYSTEM_PROMPT = `You are NeuroCompute — a precise, real-time visual intelligence system for technical users.
 
-Return this exact structure:
+Analyze the image and respond with valid JSON only using this exact structure:
+
 {
-  "scene": "One concise sentence describing the overall scene",
+  "scene": "One concise, descriptive sentence of the overall scene",
   "objects": [
-    { "label": "object name", "detail": "brief qualifier if useful" }
+    {
+      "label": "short specific name (2-4 words max)",
+      "detail": "brief useful qualifier or spatial context",
+      "confidence": "high|medium|low"
+    }
   ],
-  "confidence": "high" | "medium" | "low",
-  "summary": "One sentence technical summary of what is visible"
+  "confidence": "high|medium|low",
+  "summary": "One technical sentence summarizing what is visible and notable",
+  "actionable": "Short practical insight if genuinely relevant, e.g. 'person appears focused on screen'"
 }
 
 Rules:
-- List up to 8 objects maximum
-- Keep labels short (1-3 words)
+- Maximum 7 objects
+- Be extremely specific ("red coffee mug" not "cup", "laptop on desk" not "device")
+- Include spatial relationships when obvious ("book beside keyboard")
 - confidence is high if scene is clear, medium if partially obscured, low if ambiguous or dark
-- Never include markdown formatting
-- Never include commentary outside the JSON`;
+- Only include "actionable" if there is a genuinely useful observation — omit the field otherwise
+- Never hallucinate objects that are not clearly visible
+- Never add explanations, markdown, code fences, or any text outside the JSON object`;
 
 export async function analyzeFrame(
   base64Image: string,
@@ -37,22 +47,8 @@ export async function analyzeFrame(
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 512,
-      // BUG FIX 5:
-      // Previously the system prompt was embedded as the second item in the
-      // user content array (after the image). Two problems:
-      //
-      // 1. Ordering: Vision models expect text instructions to precede the
-      //    image content in the content array. Placing the prompt after the
-      //    image caused inconsistent format compliance — the model would
-      //    occasionally prepend commentary or wrap output in markdown fences.
-      //
-      // 2. Role: The instruction belongs in a `system` role message, not
-      //    inline in the user turn. A proper system message is given higher
-      //    weight by the model for format and behavioral constraints.
-      //
-      // Fix: add a `system` role message for the format instructions, and
-      // keep the user turn as image-only so the model's attention is entirely
-      // on the visual when generating its response.
+      // System message carries the format instructions so the model has full
+      // attention on the visual when generating. User turn is image-only.
       messages: [
         {
           role: "system",
@@ -83,14 +79,15 @@ export async function analyzeFrame(
 
   const rawContent = data.choices?.[0]?.message?.content ?? "";
 
-  // Strip any accidental markdown fences
+  // Strip any accidental markdown fences the model emits
   const cleaned = rawContent.replace(/```json|```/g, "").trim();
 
   let parsed: Omit<DetectionResult, "timestamp" | "processingTime">;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    // Fallback if model returns non-JSON
+    // Graceful fallback — surface the raw text as the summary so the user
+    // can see what the model actually returned rather than a silent failure.
     parsed = {
       scene: "Unable to parse scene",
       objects: [],
