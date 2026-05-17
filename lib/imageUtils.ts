@@ -1,5 +1,21 @@
 /**
+ * Returns an adaptive JPEG quality value (0–1) based on recent average API latency.
+ * High latency → lower quality to reduce payload size and speed up round-trips.
+ *
+ * Thresholds (tuned for Mistral Pixtral-12B typical latency profile):
+ *   > 2000 ms → 0.45  (aggressive compression)
+ *   > 1500 ms → 0.55  (moderate compression)
+ *   ≤ 1500 ms → 0.65  (default quality, good detail)
+ */
+export function adaptiveQuality(avgLatencyMs: number): number {
+  if (avgLatencyMs > 2000) return 0.45;
+  if (avgLatencyMs > 1500) return 0.55;
+  return 0.65;
+}
+
+/**
  * Captures a frame from a video element and returns a compressed base64 JPEG.
+ * quality defaults to 0.65; callers should use adaptiveQuality() to compute it.
  */
 export function captureFrame(
   video: HTMLVideoElement,
@@ -8,15 +24,12 @@ export function captureFrame(
 ): string | null {
   if (video.readyState < 2) return null;
 
-  // BUG FIX 6:
-  // readyState >= 2 is necessary but not sufficient. In some browsers
-  // (notably Firefox and Safari) the video can reach HAVE_CURRENT_DATA while
-  // videoWidth / videoHeight are still 0 — the frame data hasn't been
-  // decoded yet. Without this guard:
+  // BUG FIX 6: readyState >= 2 is necessary but not sufficient.
+  // In Firefox and Safari the video can reach HAVE_CURRENT_DATA while
+  // videoWidth / videoHeight are still 0. Without this guard:
   //   scale = Math.min(1, 640 / 0) → Infinity
   //   canvas.width = 0 * Infinity → NaN
-  // ctx.drawImage on a NaN-sized canvas produces a corrupt or empty frame
-  // that gets sent to the API as a broken payload.
+  // ctx.drawImage on a NaN-sized canvas produces a corrupt frame.
   if (video.videoWidth === 0 || video.videoHeight === 0) return null;
 
   const canvas = document.createElement("canvas");
@@ -29,7 +42,7 @@ export function captureFrame(
 
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // Strip the data URL prefix, return only base64 data
+  // Strip the data URL prefix — return only the raw base64 payload
   const dataUrl = canvas.toDataURL("image/jpeg", quality);
   return dataUrl.split(",")[1] ?? null;
 }
@@ -50,7 +63,7 @@ export function formatLatency(ms: number): string {
 }
 
 /**
- * Format a timestamp into a short time string.
+ * Format a Unix timestamp into a short HH:MM:SS string.
  */
 export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-US", {
